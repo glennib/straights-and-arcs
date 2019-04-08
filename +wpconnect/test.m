@@ -14,8 +14,8 @@ p = [
 % l = 0:25:big_arc.length;
 % p = big_arc.position(l);
 % 
-R_accept = 1;
-R_min = 20;
+R_accept = 10;
+R_min = 50;
 
 %%
 path = wpconnect.Path(p, R_accept, R_min);
