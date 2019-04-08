@@ -28,6 +28,7 @@ classdef Path
             end
             
             dp = diff(p,[],2);
+            dist = sqrt(dp(1,:).^2 + dp(2,:).^2);
             dp3 = [dp; zeros(1,size(dp,2))];
             cp = cross(dp3(:,1:end-1), dp3(:,2:end));
             turning = sign(cp(3,:)); % +1 for clockwise, -1 for counterclockwise
@@ -36,12 +37,38 @@ classdef Path
 
             diff_angle = turning.*(beta(2:end) - beta(1:end-1));
             alpha = abs(abs(diff_angle/2)-deg2rad(90));
-
-            % R_accept = R_turn ./ tan(alpha);
-            R_turn = R_accept .* tan(alpha);
+            
+            i_parallels = abs(alpha-deg2rad(90)) < eps;
+            R_turn(~i_parallels) = R_accept(~i_parallels) .* tan(alpha(~i_parallels));
+            R_turn(i_parallels) = 0.0;
             i_resize_turn = R_turn < R_turn_min;
-            R_turn(i_resize_turn) = R_turn_min;
-            R_accept(i_resize_turn) = R_turn_min ./ tan(alpha(i_resize_turn));
+            R_accept(i_resize_turn & ~i_parallels) = R_turn_min ./ tan(alpha(i_resize_turn & ~i_parallels));
+            R_accept(i_parallels) = 0.0;
+            
+            %Control that R_accept is not too large
+            R_accept = min(R_accept, min(dist(1:N_arcs), dist(2:N_arcs+1)));
+            R_accept_org = R_accept;
+            change = true;
+            %Loop until R_accept is within bounds for all corners
+            while change
+                change = false;
+                for i = 1:N_arcs-1
+                    if R_accept(i) + R_accept(i+1) > dist(i+1)
+                        R_accept(i) = dist(i+1)-R_accept(i+1);
+                        change = true;
+                    end
+                end
+            end
+            
+            %Do forward pass to check if R_accept can be relaxed at some
+            %corners
+            R_accept(1) = min([R_accept_org(1), dist(i+1)-R_accept(i+1), dist(1)]);
+            for i = 2:N_arcs-1
+                R_accept(i) = min([R_accept_org(i), dist(i+1)-R_accept(i+1), dist(i)-R_accept(i-1)]);
+            end
+            R_accept(N_arcs) = min([R_accept_org(N_arcs), dist(N_arcs+1), dist(N_arcs)-R_accept(N_arcs-1)]);
+            
+            R_turn = R_accept .* tan(alpha);         
             this.R_turn = R_turn;
             this.R_accept = R_accept;
 
@@ -72,6 +99,17 @@ classdef Path
                 this.segments(N_segments) = wpconnect.Straight(p_turn_end(:,N_arcs), p(:,end), this.segments(N_segments-1).length_end);
             end
             this.length = this.segments(N_segments).length_end;
+            
+            %Delete singular arcs
+            i = 1;
+            while i <= length(this.segments) 
+               if isa(this.segments(i), 'wpconnect.Arc') && this.segments(i).R <= eps
+                   this.segments(i) = [];
+               else    
+                    i = i+1;
+               end
+            end
+            
         end
         
         function p = position(this, length)
